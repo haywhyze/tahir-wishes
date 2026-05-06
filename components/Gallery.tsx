@@ -8,13 +8,13 @@ export interface GalleryPhoto {
   alt: string
 }
 
-const AUTO_INTERVAL = 4500
+const AUTO_INTERVAL = 4000
 const SWIPE_THRESHOLD = 40
 
 export default function Gallery({ photos }: { photos: GalleryPhoto[] }) {
   const [index, setIndex] = useState(0)
-  const [paused, setPaused] = useState(false)
   const touchStartX = useRef<number | null>(null)
+  const lastInteractionRef = useRef<number>(0)
   const total = photos.length
 
   const go = useCallback(
@@ -26,21 +26,37 @@ export default function Gallery({ photos }: { photos: GalleryPhoto[] }) {
 
   const goTo = useCallback((i: number) => setIndex(((i % total) + total) % total), [total])
 
+  // Autoplay — always running. Manual interaction nudges the timer
+  // forward so the user gets ~AUTO_INTERVAL ms after their click before
+  // the next auto-advance, but we never fully stop.
   useEffect(() => {
-    if (paused || total <= 1) return
-    const id = setInterval(() => go(1), AUTO_INTERVAL)
+    if (total <= 1) return
+    const tick = () => {
+      const sinceInteraction = Date.now() - lastInteractionRef.current
+      if (sinceInteraction >= AUTO_INTERVAL) go(1)
+    }
+    const id = setInterval(tick, AUTO_INTERVAL)
     return () => clearInterval(id)
-  }, [paused, go, total])
+  }, [go, total])
+
+  const nudge = useCallback(() => {
+    lastInteractionRef.current = Date.now()
+  }, [])
 
   // Keyboard nav
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') go(-1)
-      else if (e.key === 'ArrowRight') go(1)
+      if (e.key === 'ArrowLeft') {
+        nudge()
+        go(-1)
+      } else if (e.key === 'ArrowRight') {
+        nudge()
+        go(1)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [go])
+  }, [go, nudge])
 
   const onTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX
@@ -48,7 +64,10 @@ export default function Gallery({ photos }: { photos: GalleryPhoto[] }) {
   const onTouchEnd = (e: React.TouchEvent) => {
     if (touchStartX.current === null) return
     const dx = e.changedTouches[0].clientX - touchStartX.current
-    if (Math.abs(dx) > SWIPE_THRESHOLD) go(dx < 0 ? 1 : -1)
+    if (Math.abs(dx) > SWIPE_THRESHOLD) {
+      nudge()
+      go(dx < 0 ? 1 : -1)
+    }
     touchStartX.current = null
   }
 
@@ -69,8 +88,6 @@ export default function Gallery({ photos }: { photos: GalleryPhoto[] }) {
 
       <div
         className="g-stage"
-        onMouseEnter={() => setPaused(true)}
-        onMouseLeave={() => setPaused(false)}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
         role="region"
@@ -100,7 +117,7 @@ export default function Gallery({ photos }: { photos: GalleryPhoto[] }) {
             type="button"
             className="g-nav g-prev"
             aria-label="Previous photo"
-            onClick={() => go(-1)}
+            onClick={() => { nudge(); go(-1); }}
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M15 6 L 9 12 L 15 18" strokeLinecap="round" strokeLinejoin="round" />
@@ -110,7 +127,7 @@ export default function Gallery({ photos }: { photos: GalleryPhoto[] }) {
             type="button"
             className="g-nav g-next"
             aria-label="Next photo"
-            onClick={() => go(1)}
+            onClick={() => { nudge(); go(1); }}
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M9 6 L 15 12 L 9 18" strokeLinecap="round" strokeLinejoin="round" />
@@ -134,7 +151,7 @@ export default function Gallery({ photos }: { photos: GalleryPhoto[] }) {
                 aria-selected={i === index}
                 aria-label={`Photo ${i + 1}`}
                 className={`g-dot${i === index ? ' is-active' : ''}`}
-                onClick={() => goTo(i)}
+                onClick={() => { nudge(); goTo(i); }}
               />
             ))}
           </div>
